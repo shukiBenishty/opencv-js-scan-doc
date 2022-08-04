@@ -24,7 +24,7 @@
             area = cv.contourArea(cnt)
             if (area < minArea || area > maxArea)
                 continue;
-            
+
             let peri = cv.arcLength(cnt, true)
             // You can try more different parameters
             while (tmp.empty() || loop) {
@@ -38,7 +38,7 @@
                 if (epsilonFactor > 0.2)
                     loop = false
             }
-            
+
         }
         if (biggest) {
             // cnt = contours.get(biggest);
@@ -52,7 +52,14 @@
     function openCvReady() {
         cv['onRuntimeInitialized'] = () => {
             let video = document.getElementById("cam_input"); // video is the id of video tag
-            navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+            navigator.mediaDevices.getUserMedia({
+                    audio: false,
+                    video: {
+                        width: { min: 1024, ideal: 1280, max: 1920 },
+                        height: { min: 576, ideal: 720, max: 1080 },
+                        facingMode: { exact: "environment" }
+                    }
+                })
                 .then(function (stream) {
                     video.srcObject = stream;
                     video.play();
