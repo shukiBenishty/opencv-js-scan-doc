@@ -6,11 +6,60 @@
     <title>Opencv JS</title>
     <script async src="js/opencv.js" onload="openCvReady();"></script>
     <script src="js/utils.js"></script>
+    <style>
+        label {
+            display:block;
+        }
+    </style>
 </head>
 
 <body>
-    <video id="cam_input" height="480" width="640" hidden></video>
+    <div>
+        <div>
+            <span>
+                <label for="sigmaTrackbar">Gaussian Blur Sigma</label>
+                <input type="range" id="sigmaTrackbar" value="1.4" min="0" max="2.0" step="0.1">
+                <input type="text" id="sigmaValue" size="3" value="1.4" />
+            </span>
+            <span>
+                <label for="kSizeTrackbar">Gaussian Blur kSize</label>
+                <input type="range" id="kSizeTrackbar" value="9" min="1" max="13" step="2">
+                <input type="text" id="kSizeValue" size="3" value="9" />
+            </span>
+        </div>
+        <canvas id="canvas_blur"></canvas>
+    </div>
+    <div>
+        <span>
+            <label for="threshold1Trackbar">Canny Threshold 1</label>
+            <input type="range" id="threshold1Trackbar" value="75" min="0" max="255" step="1">
+            <input type="text" id="threshold1Value" size="3" value="75" />
+        </span>
+        <span>
+            <label for="threshold2Trackbar">Canny Threshold 2</label>
+            <input type="range" id="threshold2Trackbar" value="100" min="0" max="255" step="1">
+            <input type="text" id="threshold2Value" size="3" value="100" />
+        </span>
+        <span>
+            <label for="apertureSizeTrackbar">Gaussian  Size</label>
+            <input type="range" id="apertureSizeTrackbar" value="3" min="3" max="7" step="2">
+            <input type="text" id="apertureSizeValue" size="3" value="3" />
+        </span>
+        <canvas id="canvas_canny"></canvas>
+    </div>
+    <div>
+        <!-- <div>
+            <span>
+                <label for="thresholdTrackbar">Threshold</label>
+                <input type="range" id="thresholdTrackbar" value="100" min="0" max="255" step="1">
+                <input type="text" id="thresholdValue" size="3" value="100" />
+            </span>
+        </div> -->
+        <canvas id="canvas_dilate"></canvas>
+    </div>
     <canvas id="canvas_output"></canvas>
+
+    <video id="cam_input" hidden></video>
 </body>
 <script>
     const biggestContour = (contours, minArea = 5000, maxArea = 50000, epsilonFactor = 0.01, loop = false) => {
@@ -18,8 +67,10 @@
         let max_area = 0
         let poly = new cv.MatVector();
         let cnt = new cv.Mat();
-        let tmp = new cv.Mat();
+        let tmp;
         for (let i = 0; i < contours.size(); i++) {
+            let _epsilonFactor = epsilonFactor
+            tmp = new cv.Mat();
             cnt = contours.get(i);
             area = cv.contourArea(cnt)
             if (area < minArea || area > maxArea)
@@ -28,14 +79,14 @@
             let peri = cv.arcLength(cnt, true)
             // You can try more different parameters
             while (tmp.empty() || loop) {
-                cv.approxPolyDP(cnt, tmp, epsilonFactor * peri, true)
-                epsilonFactor += 0.005
+                cv.approxPolyDP(cnt, tmp, _epsilonFactor * peri, true)
+                _epsilonFactor += 0.005
                 if (area > max_area && tmp.total() === 4) {
                     biggest = tmp
                     max_area = area
                     loop = false
                 }
-                if (epsilonFactor > 0.2)
+                if (_epsilonFactor > 0.2)
                     loop = false
             }
 
@@ -44,42 +95,43 @@
             // cnt = contours.get(biggest);
             poly.push_back(biggest);
         }
-        cnt.delete(); tmp.delete();
+        cnt.delete(); //tmp.delete();
         return { poly, max_area }
     }
 </script>
 <script type="text/JavaScript">
     function openCvReady() {
         cv['onRuntimeInitialized'] = () => {
-            let video = document.getElementById("cam_input"); // video is the id of video tag
-            navigator.mediaDevices.getUserMedia({
-                    audio: false,
-                    video: {
-                        width: { min: 1024, ideal: 1280, max: 1920 },
-                        height: { min: 576, ideal: 720, max: 1080 },
-                        facingMode: { exact: "environment" }
-                    }
-                })
-                .then(function (stream) {
-                    video.srcObject = stream;
-                    video.play();
-                })
-                .catch(function (err) {
-                    console.log("An error occurred! " + err);
-                });
-            let src = new cv.Mat(video.height, video.width, cv.CV_8UC4);
-            let dst = new cv.Mat(video.height, video.width, cv.CV_8UC1);
+            let src;
+            let cap;
+            let dst = new cv.Mat();
+
+            let sigmaValue = document.getElementById('sigmaValue');
+            let sigmaTrackbar = document.getElementById('sigmaTrackbar');
+
+            let kSizeValue = document.getElementById('kSizeValue');
+            let kSizeTrackbar = document.getElementById('kSizeTrackbar');
+
+            let threshold1Value = document.getElementById('threshold1Value');
+            let threshold1Trackbar = document.getElementById('threshold1Trackbar');
+
+            let threshold2Value = document.getElementById('threshold2Value');
+            let threshold2Trackbar = document.getElementById('threshold2Trackbar');
+
+            let aSizeValue = document.getElementById('apertureSizeValue');
+            let aSizeTrackbar = document.getElementById('apertureSizeTrackbar');
+            
             let gray = new cv.Mat();
             let blur = new cv.Mat();
+            let bw = new cv.Mat();
             let canny = new cv.Mat();
             let dilate = new cv.Mat();
             let erode = new cv.Mat();
-            let cap = new cv.VideoCapture(cam_input);
             let kernel = cv.Mat.ones(5, 5, cv.CV_8U);
             let faces = new cv.RectVector();
             let classifier = new cv.CascadeClassifier();
             let utils = new Utils('errorMessage');
-            let ksize = new cv.Size(5, 5);
+
             let anchor = new cv.Point(-1, -1);
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
@@ -92,18 +144,41 @@
             //     classifier.load(faceCascadeFile); // in the callback, load the cascade from file 
             // });
             const FPS = 30;
+
+            const MAX_DIM = 320;
+
             function processVideo() {
                 let begin = Date.now();
                 cap.read(src);
-                src.copyTo(dst);
+                
+                let scale = 1.0 * MAX_DIM / Math.max(src.matSize[0], src.matSize[1])
+                let dsize = new cv.Size(src.matSize[1] * scale, src.matSize[0] * scale);
+                cv.resize(src, dst, dsize, 0, 0, cv.INTER_AREA);
+                cv.cvtColor(dst, dst, cv.COLOR_RGB2BGR);
+                let sigma = sigmaTrackbar.value;
+                let kSize = kSizeTrackbar.value;
+                let threshold1 = threshold1Trackbar.value;
+                let threshold2 = threshold2Trackbar.value;
+                let aSize = aSizeTrackbar.value;
+                sigmaValue.setAttribute('value', sigma);
+                kSizeValue.setAttribute('value', kSize);
+                threshold1Value.setAttribute('value', threshold1);
+                threshold2Value.setAttribute('value', threshold2);
+                aSizeValue.setAttribute('value', aSize);
 
-                let maxArea = dst.matSize[0] * dst.matSize[1] * 0.9
-                let minArea = dst.matSize[0] * dst.matSize[1] * 0.1
+                let _ksize = new cv.Size(Number(kSize), Number(kSize));
+                let maxArea = dst.matSize[0] * dst.matSize[1] * 0.95
+                let minArea = dst.matSize[0] * dst.matSize[1] * 0.4
                 cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY, 0);
-                cv.GaussianBlur(gray, blur, ksize, 0.4)
-                cv.threshold(blur, blur, 40, 255,  cv.THRESH_BINARY | cv.THRESH_OTSU);
-                cv.Canny(blur, canny, 75, 100, 5, true);
+                cv.GaussianBlur(gray, blur, _ksize, Number(sigma))
+                cv.imshow("canvas_blur", blur );
+
+                // cv.threshold(blur, bw,  Number(threshold), 255,  cv.THRESH_BINARY_INV);
+                // cv.imshow("canvas_bw", bw );
+                cv.Canny(blur, canny, Number(threshold1), Number(threshold2), Number(aSize), true);
+                cv.imshow("canvas_canny", canny );
                 cv.dilate(canny, dilate, kernel, anchor, 1)
+                cv.imshow("canvas_dilate", dilate );
                 // cv.erode(dilate, erode, kernel, anchor, 1)
                 cv.findContours(dilate, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
@@ -143,18 +218,51 @@
                 // cv.imshow("canvas_output", dst);
 
 
-                const { poly, max_area } = biggestContour(contours, minArea, maxArea, 0.03, false)
-                if(max_area !== 0)
-                    cv.drawContours(dst, poly, -1, color, 5);
+                const { poly, max_area } = biggestContour(contours, minArea, maxArea, 0.01, true)
+                if(max_area !== 0){
+                    for (let i = 0; i < poly.size(); ++i) {
+                        let color = new cv.Scalar(0,255,0);
+                        cv.drawContours(dst, poly, i, color, 2);
+                    }
+                }
+                cv.cvtColor(dst, dst, cv.COLOR_BGR2RGB);
+
+                cv.imshow("canvas_output", dst );
 
 
-                cv.imshow("canvas_output", dst);
+
                 // schedule next one.
                 let delay = 1000 / FPS - (Date.now() - begin);
                 setTimeout(processVideo, delay);
             }
-            // schedule first one.
-            setTimeout(processVideo, 0);
+
+            let video = document.getElementById("cam_input"); // video is the id of video tag
+            navigator.mediaDevices.getUserMedia({
+                    audio: false,
+                    video: {
+                        width: { min: 1024, ideal: 1280, max: 1920 },
+                        height: { min: 576, ideal: 720, max: 1080 },
+                        facingMode: "environment",
+                    }
+                })
+                .then(function (stream) {
+                    let setting = stream.getVideoTracks()[0].getSettings()
+                    video.setAttribute('width', setting.width)
+                    video.setAttribute('height', setting.height)
+                    video.srcObject = stream;
+                    video.play();
+                    src = new cv.Mat(setting.height, setting.width, cv.CV_8UC4);
+                    cap = new cv.VideoCapture(cam_input)
+                                // schedule first one.
+                    setTimeout(processVideo, 0);
+                })
+                .catch(function (err) {
+                    console.log("An error occurred! " + err);
+                });
+           
+            
+            
+
         };
     }
 </script>
