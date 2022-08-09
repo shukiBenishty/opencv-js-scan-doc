@@ -8,228 +8,233 @@
     <script src="js/utils.js"></script>
     <style>
         label {
-            display:block;
+            display: block;
         }
     </style>
 </head>
 
 <body>
     <div>
-        <div>
-            <span>
-                <label for="sigmaTrackbar">Gaussian Blur Sigma</label>
-                <input type="range" id="sigmaTrackbar" value="1.4" min="0" max="2.0" step="0.1">
-                <input type="text" id="sigmaValue" size="3" value="1.4" />
-            </span>
-            <span>
-                <label for="kSizeTrackbar">Gaussian Blur kSize</label>
-                <input type="range" id="kSizeTrackbar" value="9" min="1" max="13" step="2">
-                <input type="text" id="kSizeValue" size="3" value="9" />
-            </span>
+        <div class="inputoutput">
+            <video id="cam_input" hidden></video>
         </div>
-        <canvas id="canvas_blur"></canvas>
+        <div id="output">
+            <div>
+                <canvas id="canvasOutput"></canvas>
+                <div class="caption">canvasOutput</div>
+            </div>
+        </div>
     </div>
-    <div>
-        <span>
-            <label for="threshold1Trackbar">Canny Threshold 1</label>
-            <input type="range" id="threshold1Trackbar" value="75" min="0" max="255" step="1">
-            <input type="text" id="threshold1Value" size="3" value="75" />
-        </span>
-        <span>
-            <label for="threshold2Trackbar">Canny Threshold 2</label>
-            <input type="range" id="threshold2Trackbar" value="100" min="0" max="255" step="1">
-            <input type="text" id="threshold2Value" size="3" value="100" />
-        </span>
-        <span>
-            <label for="apertureSizeTrackbar">Gaussian  Size</label>
-            <input type="range" id="apertureSizeTrackbar" value="3" min="3" max="7" step="2">
-            <input type="text" id="apertureSizeValue" size="3" value="3" />
-        </span>
-        <canvas id="canvas_canny"></canvas>
-    </div>
-    <div>
-        <!-- <div>
-            <span>
-                <label for="thresholdTrackbar">Threshold</label>
-                <input type="range" id="thresholdTrackbar" value="100" min="0" max="255" step="1">
-                <input type="text" id="thresholdValue" size="3" value="100" />
-            </span>
-        </div> -->
-        <canvas id="canvas_dilate"></canvas>
-    </div>
-    <canvas id="canvas_output"></canvas>
+    <script>
+        function drawRect(img, points, thickness = 4, Offset = 50) {
+            let p1 = new cv.Point(points[0][0] - Offset, points[0][1] - Offset)
+            let p2 = new cv.Point(points[1][0] + Offset, points[1][1] - Offset)
+            let p3 = new cv.Point(points[2][0] + Offset, points[2][1] + Offset)
+            let p4 = new cv.Point(points[3][0] - Offset, points[3][1] + Offset)
 
-    <video id="cam_input" hidden></video>
-</body>
-<script>
-    const biggestContour = (contours, minArea = 5000, maxArea = 50000, epsilonFactor = 0.01, loop = false) => {
-        let biggest;
-        let max_area = 0
-        let poly = new cv.MatVector();
-        let cnt = new cv.Mat();
-        let tmp;
-        for (let i = 0; i < contours.size(); i++) {
-            let _epsilonFactor = epsilonFactor
-            tmp = new cv.Mat();
-            cnt = contours.get(i);
-            area = cv.contourArea(cnt)
-            if (area < minArea || area > maxArea)
-                continue;
+            let color = new cv.Scalar(255, 0, 0)
 
-            let peri = cv.arcLength(cnt, true)
-            // You can try more different parameters
-            while (tmp.empty() || loop) {
-                cv.approxPolyDP(cnt, tmp, _epsilonFactor * peri, true)
-                _epsilonFactor += 0.005
-                if (area > max_area && tmp.total() === 4) {
-                    biggest = tmp
-                    max_area = area
-                    loop = false
+            cv.line(img, p1, p2, color, thickness)
+            cv.line(img, p2, p3, color, thickness)
+            cv.line(img, p3, p4, color, thickness)
+            cv.line(img, p4, p1, color, thickness)
+        }
+
+        function grabCut(img) {
+            cv.cvtColor(img, img, cv.COLOR_RGBA2RGB, 0);
+            let mask = cv.Mat.zeros(img.cols, img.rows, cv.CV_8U);
+            let bgdModel = cv.Mat.zeros(1, 65, cv.CV_64F);
+            let fgdModel = cv.Mat.zeros(1, 65, cv.CV_64F);
+            let rect = new cv.Rect(25, 25, img.cols - 25, img.rows - 25);
+            cv.grabCut(img, mask, rect, bgdModel, fgdModel, 1, cv.GC_INIT_WITH_RECT);
+            for (let i = 0; i < img.rows; i++) {
+                for (let j = 0; j < img.cols; j++) {
+                    if (mask.ucharPtr(i, j)[0] == 0 || mask.ucharPtr(i, j)[0] == 2) {
+                        img.ucharPtr(i, j)[0] = 0;
+                        img.ucharPtr(i, j)[1] = 0;
+                        img.ucharPtr(i, j)[2] = 0;
+                    }
                 }
-                if (_epsilonFactor > 0.2)
-                    loop = false
+            }
+        }
+
+        function bilateralFilter(src, dst) {
+            //highly effective in noise removal while keeping edges sharp.
+            let tmp = new cv.Mat();
+            cv.cvtColor(src, tmp, cv.COLOR_RGBA2RGB, 0);
+            // You can try more different parameters
+            cv.bilateralFilter(tmp, dst, 5, 75, 75, cv.BORDER_DEFAULT);
+            tmp.delete();
+        }
+        function countourToMinAreaRect(cnt) {
+            let rect = cv.minAreaRect(cnt)
+            let vertices = cv.RotatedRect.points(rect);
+            let m = cv.matFromArray(4, 2, cv.CV_32SC1, [
+                vertices[0].x, vertices[0].y,
+                vertices[1].x, vertices[1].y,
+                vertices[2].x, vertices[2].y,
+                vertices[3].x, vertices[3].y
+            ])
+            // Initialise a MatVector
+            let matVec = new cv.MatVector();
+            // Push a Mat back into MatVector
+            matVec.push_back(m);
+            return matVec;
+        }
+
+        function drawCanvas(title, img) {
+            var canvas = document.getElementById(`canvas-${title}`);
+            if (!canvas) {
+                var parent = document.createElement("div");
+                var div = document.createElement("div");
+                var text = document.createTextNode(title);
+                var canvas = document.createElement("canvas", {});
+                canvas.setAttribute("id", `canvas-${title}`)
+                div.appendChild(text)
+                parent.appendChild(canvas)
+                parent.appendChild(div)
+
+                var outputDiv = document.getElementById("output");
+                outputDiv.appendChild(parent);
             }
 
+            cv.imshow(`canvas-${title}`, img);
         }
-        if (biggest) {
-            // cnt = contours.get(biggest);
-            poly.push_back(biggest);
+
+        function resize(src, dst, MAX_DIM = 320) {
+            let scale = 1.0 * MAX_DIM / Math.max(src.matSize[0], src.matSize[1])
+            let dsize = new cv.Size(src.matSize[1] * scale, src.matSize[0] * scale);
+            cv.resize(src, dst, dsize, 0, 0, cv.INTER_AREA);
         }
-        cnt.delete(); //tmp.delete();
-        return { poly, max_area }
-    }
-</script>
-<script type="text/JavaScript">
+
+        function equalizeHistogram(src, dst) {
+            cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY, 0);
+            cv.equalizeHist(dst, dst);
+        }
+
+        function morphologyClose(src, dst = new cv.Mat()) {
+            let kernel = cv.Mat.ones(2, 2, cv.CV_8U)
+            let anchor = new cv.Point(-1, -1);
+            cv.morphologyEx(src, dst, cv.MORPH_CLOSE, kernel, anchor, 3,
+                cv.BORDER_CONSTANT, cv.morphologyDefaultBorderValue());
+            return dst;
+        }
+
+        function filter2DSharp(src, dst = new cv.Mat()) {
+            let _anchor = new cv.Point(-1, -1);
+            let _karnal = cv.matFromArray(3, 3, cv.CV_32FC1, [0, -1, 0, -1, 5, -1, 0, -1, 0]);
+            cv.filter2D(src, dst, cv.CV_8U, _karnal, _anchor, 0, cv.BORDER_DEFAULT);
+            return dst;
+        }
+
+        function gaussianBlur(src, dst = new cv.Mat()) {
+            let _ksize = new cv.Size(5, 5);
+            cv.GaussianBlur(src, dst, _ksize, 1.4)
+            return dst;
+        }
+
+        function findContours(contours, minArea, maxArea, epsilonFactor = 0.02) {
+            let poly = new cv.MatVector();
+            for (let i = 0; i < contours.size(); i++) {
+                let cnt = contours.get(i);
+                let area = cv.contourArea(cnt)
+                if (area < minArea || area > maxArea)
+                    continue;
+                let tmp = new cv.Mat();
+                let peri = cv.arcLength(cnt, true)
+                cv.approxPolyDP(cnt, tmp, epsilonFactor * peri, true)
+                if (tmp.total() !== 4) {
+                    continue;
+                }
+                poly.push_back(tmp)
+            }
+            return poly
+
+        }
+
+        function findContoursBySize(contours, minArea, maxArea, epsilonFactor = 0.02) {
+            let poly = new cv.MatVector();
+            for (let i = 0; i < contours.size(); i++) {
+                let cnt = contours.get(i);
+                let area = cv.contourArea(cnt)
+                if (area < minArea || area > maxArea)
+                    continue;
+                poly.push_back(cnt)
+            }
+            return poly
+
+        }
+    </script>
+    <script type="text/JavaScript">
     function openCvReady() {
         cv['onRuntimeInitialized'] = () => {
+            const FPS = 30;
+            const MAX_DIM = 640;
+            
             let src;
             let cap;
             let dst = new cv.Mat();
-
-            let sigmaValue = document.getElementById('sigmaValue');
-            let sigmaTrackbar = document.getElementById('sigmaTrackbar');
-
-            let kSizeValue = document.getElementById('kSizeValue');
-            let kSizeTrackbar = document.getElementById('kSizeTrackbar');
-
-            let threshold1Value = document.getElementById('threshold1Value');
-            let threshold1Trackbar = document.getElementById('threshold1Trackbar');
-
-            let threshold2Value = document.getElementById('threshold2Value');
-            let threshold2Trackbar = document.getElementById('threshold2Trackbar');
-
-            let aSizeValue = document.getElementById('apertureSizeValue');
-            let aSizeTrackbar = document.getElementById('apertureSizeTrackbar');
-            
-            let gray = new cv.Mat();
-            let blur = new cv.Mat();
-            let bw = new cv.Mat();
-            let canny = new cv.Mat();
-            let dilate = new cv.Mat();
-            let erode = new cv.Mat();
-            let kernel = cv.Mat.ones(5, 5, cv.CV_8U);
-            let faces = new cv.RectVector();
-            let classifier = new cv.CascadeClassifier();
-            let utils = new Utils('errorMessage');
-
-            let anchor = new cv.Point(-1, -1);
+            let sharp = new cv.Mat()
+            let close = new cv.Mat()
+            let smood = new cv.Mat()
+            let gray = new cv.Mat()
+            let blur = new cv.Mat()
+            let canny = new cv.Mat()
+            let dilate = new cv.Mat()
+            let points = new cv.Mat()
+            let histo = new cv.Mat()
+            let mBlur = new cv.Mat()
+            let bw = new cv.Mat()
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
-            // let color = new cv.Scalar(87,1,244);
-            let color = new cv.Scalar(Math.round(Math.random() * 255),
-                          Math.round(Math.random() * 255),
-                             Math.round(Math.random() * 255))
-            // let faceCascadeFile = 'haarcascade_frontalface_default.xml'; // path to xml
-            // utils.createFileFromUrl(faceCascadeFile, faceCascadeFile, () => {
-            //     classifier.load(faceCascadeFile); // in the callback, load the cascade from file 
-            // });
-            const FPS = 30;
-
-            const MAX_DIM = 320;
+            let anchor = new cv.Point(-1, -1);
+            let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
 
             function processVideo() {
                 let begin = Date.now();
                 cap.read(src);
                 
-                let scale = 1.0 * MAX_DIM / Math.max(src.matSize[0], src.matSize[1])
-                let dsize = new cv.Size(src.matSize[1] * scale, src.matSize[0] * scale);
-                cv.resize(src, dst, dsize, 0, 0, cv.INTER_AREA);
-                cv.cvtColor(dst, dst, cv.COLOR_RGB2BGR);
-                let sigma = sigmaTrackbar.value;
-                let kSize = kSizeTrackbar.value;
-                let threshold1 = threshold1Trackbar.value;
-                let threshold2 = threshold2Trackbar.value;
-                let aSize = aSizeTrackbar.value;
-                sigmaValue.setAttribute('value', sigma);
-                kSizeValue.setAttribute('value', kSize);
-                threshold1Value.setAttribute('value', threshold1);
-                threshold2Value.setAttribute('value', threshold2);
-                aSizeValue.setAttribute('value', aSize);
-
-                let _ksize = new cv.Size(Number(kSize), Number(kSize));
+                // 1
+                resize(src, dst, MAX_DIM);
                 let maxArea = dst.matSize[0] * dst.matSize[1] * 0.95
-                let minArea = dst.matSize[0] * dst.matSize[1] * 0.4
-                cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY, 0);
-                cv.GaussianBlur(gray, blur, _ksize, Number(sigma))
-                cv.imshow("canvas_blur", blur );
+                let minArea = dst.matSize[0] * dst.matSize[1] * 0.004
+                
+                // 2
+                sharp = filter2DSharp(dst)
+                // drawCanvas("sharp", sharp);
 
-                // cv.threshold(blur, bw,  Number(threshold), 255,  cv.THRESH_BINARY_INV);
-                // cv.imshow("canvas_bw", bw );
-                cv.Canny(blur, canny, Number(threshold1), Number(threshold2), Number(aSize), true);
-                cv.imshow("canvas_canny", canny );
-                cv.dilate(canny, dilate, kernel, anchor, 1)
-                cv.imshow("canvas_dilate", dilate );
-                // cv.erode(dilate, erode, kernel, anchor, 1)
-                cv.findContours(dilate, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+                // 3
+                cv.Canny(sharp, canny, 60, 180, 3, false);
+                // drawCanvas("canny", canny)
 
+                //find rect for sharp close edge
+                cv.findContours(canny, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+                let c = findContours(contours, minArea, maxArea);
 
+                if (c.size() < 1) {
+                    cv.dilate(canny, dilate, kernel, anchor, 2)
+                    // drawCanvas("dilate", dilate)
+                    cv.findContours(dilate, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
-                // let maxArea = dst.matSize[0] * dst.matSize[1] * 0.9
-                // let minArea = dst.matSize[0] * dst.matSize[1] * 0.1
-                // cv.cvtColor(dst, gray, cv.COLOR_RGBA2GRAY, 0);
-                // cv.GaussianBlur(gray, blur, ksize, 1.4)
-                // cv.threshold(blur, blur, 100, 200, cv.THRESH_BINARY);
-                // let contours = new cv.MatVector();
-                // let hierarchy = new cv.Mat();
-                // let poly = new cv.MatVector();
-                // cv.findContours(blur, contours, hierarchy, cv.RETR_CCOMP, cv.CHAIN_APPROX_SIMPLE);
-                // // approximates each contour to polygon
-                // for (let i = 0; i < contours.size(); ++i) {
-                //     let cnt = contours.get(i);
-                //     area = cv.contourArea(cnt)
-                //     if (area < minArea || area > maxArea)
-                //         continue;
-                //     let tmp = new cv.Mat();
-                //     let peri = cv.arcLength(cnt, true)
-                //     // You can try more different parameters
-                //     cv.approxPolyDP(cnt, tmp, 0.03 * peri , true);
-                //     if (tmp.total() === 4)
-                //         poly.push_back(tmp);
-                //     cnt.delete(); tmp.delete();
-                // }
-                // // draw contours with random Scalar
-                // for (let i = 0; i < poly.size(); ++i) {
-                //     let color = new cv.Scalar(Math.round(Math.random() * 255), Math.round(Math.random() * 255),
-                //                             Math.round(Math.random() * 255));
-                //     cv.drawContours(dst, poly, i, color, 1, 8, hierarchy, 0);
-                // }
+                    c = findContours(contours, minArea, maxArea);
+                    if (c.size() < 1) {
+                        equalizeHistogram(sharp, histo);
+                        // drawCanvas("histo", histo);
+                        cv.medianBlur(histo, mBlur, 5)
+                        // drawCanvas("mBlur", mBlur)
+                        cv.threshold(mBlur, bw, 230, 255, cv.THRESH_BINARY)
 
-
-                // cv.imshow("canvas_output", dst);
-
-
-                const { poly, max_area } = biggestContour(contours, minArea, maxArea, 0.01, true)
-                if(max_area !== 0){
-                    for (let i = 0; i < poly.size(); ++i) {
-                        let color = new cv.Scalar(0,255,0);
-                        cv.drawContours(dst, poly, i, color, 2);
+                        cv.findContours(dilate, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                        c = findContours(contours, minArea, maxArea);
                     }
                 }
+
+
                 cv.cvtColor(dst, dst, cv.COLOR_BGR2RGB);
-
-                cv.imshow("canvas_output", dst );
-
-
+                let color = new cv.Scalar(0, 255, 0)
+                cv.drawContours(dst, c, -1, color, 2);
+                cv.cvtColor(dst, dst, cv.COLOR_RGB2BGR);
+                cv.imshow('canvasOutput', dst);
 
                 // schedule next one.
                 let delay = 1000 / FPS - (Date.now() - begin);
@@ -259,12 +264,9 @@
                 .catch(function (err) {
                     console.log("An error occurred! " + err);
                 });
-           
-            
-            
-
         };
     }
 </script>
+</body>
 
 </html>
