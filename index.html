@@ -307,7 +307,7 @@
             //loop
             if (first) {
                 first = !trackWindow
-                // hardcode the initial location of window
+                // hardcode the initial location of window.
                 trackWindow = new cv.Rect(240, 100, 150, 200);
                 let color = new cv.Scalar(255, 0, 0)
                 cv.rectangle(frame, { x: c.data32S[0], y: c.data32S[1] }, { x: c.data32S[4], y: c.data32S[5] }, color, 2, cv.LINE_AA, 0)
