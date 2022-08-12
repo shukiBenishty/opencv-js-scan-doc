@@ -224,7 +224,7 @@
             let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
 
             let maxArea = img.matSize[0] * img.matSize[1] * 0.95
-            let minArea = img.matSize[0] * img.matSize[1] * 0.004
+            let minArea = img.matSize[0] * img.matSize[1] * 0.1
 
             // 2
             sharp = filter2DSharp(img)
